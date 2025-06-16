@@ -3,6 +3,7 @@ package fork
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -71,8 +72,14 @@ func (requester *ERC20FeeAndGasRequester) requestOne(ctx context.Context, token,
 		Holder:   holder,
 		Receiver: receiver,
 	})
+
 	if err != nil {
 		return erc20analyzer.FeeAndGasResult{}, err
+	}
+
+	// check if there is a response level error
+	if resp.Error != "" {
+		return erc20analyzer.FeeAndGasResult{}, errors.New(resp.Error)
 	}
 
 	return erc20analyzer.FeeAndGasResult{
