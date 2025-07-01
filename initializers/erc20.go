@@ -9,8 +9,8 @@ import (
 	"sync"
 
 	ethclients "github.com/Iwinswap/iwinswap-ethclients"
-	"github.com/Iwinswap/iwinswap-token-analyzer/internal/abi"
-	"github.com/Iwinswap/iwinswap-token-analyzer/internal/erc20analyzer"
+	"github.com/Iwinswap/iwinswap-token-analyzer/abi"
+	"github.com/Iwinswap/iwinswap-token-analyzer/erc20analyzer"
 	token "github.com/Iwinswap/iwinswap-token-system"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"

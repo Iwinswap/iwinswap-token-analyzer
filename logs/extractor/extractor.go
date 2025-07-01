@@ -11,7 +11,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/Iwinswap/iwinswap-token-analyzer/internal/erc20analyzer"
+	"github.com/Iwinswap/iwinswap-token-analyzer/erc20analyzer"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/core/types"
 )

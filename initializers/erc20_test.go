@@ -10,7 +10,7 @@ import (
 	"time"
 
 	ethclients "github.com/Iwinswap/iwinswap-ethclients"
-	"github.com/Iwinswap/iwinswap-token-analyzer/internal/abi"
+	"github.com/Iwinswap/iwinswap-token-analyzer/abi"
 	token "github.com/Iwinswap/iwinswap-token-system"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"

@@ -1,7 +1,7 @@
 package erc20analyzer
 
 import (
-	"github.com/Iwinswap/iwinswap-token-analyzer/internal/abi"
+	"github.com/Iwinswap/iwinswap-token-analyzer/abi"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 

@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/Iwinswap/iwinswap-anvil-forker/fork"
-	"github.com/Iwinswap/iwinswap-token-analyzer/internal/erc20analyzer"
+	"github.com/Iwinswap/iwinswap-token-analyzer/erc20analyzer"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/rpc"
 )
