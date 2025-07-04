@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"sort"
 
-	token "github.com/Iwinswap/iwinswap-token-system"
+	token "github.com/Iwinswap/iwinswap-erc20-token-system"
 )
 
 // ERC20TokenViewer defines the contract for any component that can provide a view

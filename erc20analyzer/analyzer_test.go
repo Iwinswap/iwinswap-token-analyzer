@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	token "github.com/Iwinswap/iwinswap-token-system"
+	token "github.com/Iwinswap/iwinswap-erc20-token-system"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/assert"

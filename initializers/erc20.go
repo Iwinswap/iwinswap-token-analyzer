@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"sync"
 
+	token "github.com/Iwinswap/iwinswap-erc20-token-system"
 	ethclients "github.com/Iwinswap/iwinswap-ethclients"
 	"github.com/Iwinswap/iwinswap-token-analyzer/abi"
 	"github.com/Iwinswap/iwinswap-token-analyzer/erc20analyzer"
-	token "github.com/Iwinswap/iwinswap-token-system"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 )

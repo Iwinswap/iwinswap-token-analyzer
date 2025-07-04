@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	token "github.com/Iwinswap/iwinswap-erc20-token-system"
 	subscriber "github.com/Iwinswap/iwinswap-eth-block-subscriber"
 	clientmanager "github.com/Iwinswap/iwinswap-ethclient-manager"
 	"github.com/Iwinswap/iwinswap-token-analyzer/bloom"
@@ -26,7 +27,6 @@ import (
 	"github.com/Iwinswap/iwinswap-token-analyzer/internal/services"
 	erc20_log_volume_analyzer "github.com/Iwinswap/iwinswap-token-analyzer/logs/erc20analyzer"
 	logextractor "github.com/Iwinswap/iwinswap-token-analyzer/logs/extractor"
-	token "github.com/Iwinswap/iwinswap-token-system"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/core/types"
 )

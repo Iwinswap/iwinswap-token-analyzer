@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	token "github.com/Iwinswap/iwinswap-erc20-token-system"
 	ethclients "github.com/Iwinswap/iwinswap-ethclients"
 	"github.com/Iwinswap/iwinswap-token-analyzer/abi"
-	token "github.com/Iwinswap/iwinswap-token-system"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"

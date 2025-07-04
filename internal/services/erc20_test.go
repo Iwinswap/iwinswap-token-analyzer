@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	token "github.com/Iwinswap/iwinswap-token-system"
+	token "github.com/Iwinswap/iwinswap-erc20-token-system"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
