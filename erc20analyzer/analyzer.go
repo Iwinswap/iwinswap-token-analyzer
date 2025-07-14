@@ -3,6 +3,8 @@ package erc20analyzer
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -17,6 +19,15 @@ var (
 	DefaultInitializeRequestTimeout = 20 * time.Second
 )
 
+// Logger defines a standard interface for structured, leveled logging,
+// compatible with the standard library's slog.
+type Logger interface {
+	Debug(msg string, args ...any)
+	Info(msg string, args ...any)
+	Warn(msg string, args ...any)
+	Error(msg string, args ...any)
+}
+
 // Config holds the dependencies required to initialize an Analyzer.
 type Config struct {
 	NewBlockEventer          <-chan *types.Block
@@ -28,6 +39,7 @@ type Config struct {
 	FeeAndGasUpdateFrequency time.Duration
 	MinTokenUpdateInterval   time.Duration
 	ErrorHandler             func(error)
+	Logger                   Logger
 }
 
 func (c *Config) applyDefaults() {
@@ -36,6 +48,10 @@ func (c *Config) applyDefaults() {
 	}
 	if c.MinTokenUpdateInterval == 0 {
 		c.MinTokenUpdateInterval = DefaultMinTokenUpdateInterval
+	}
+
+	if c.Logger == nil {
+		c.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 }
 
@@ -74,6 +90,7 @@ type Analyzer struct {
 
 	mu                 sync.RWMutex
 	lastFeeAndGasCheck map[common.Address]time.Time
+	logger             Logger
 }
 
 // NewAnalyzer creates and starts a new Analyzer instance.
@@ -82,6 +99,11 @@ func NewAnalyzer(ctx context.Context, cfg Config) (*Analyzer, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+
+	cfg.Logger.Info("ERC20 Analyzer starting up",
+		"fee_update_frequency", cfg.FeeAndGasUpdateFrequency,
+		"token_update_interval", cfg.MinTokenUpdateInterval,
+	)
 
 	analyzer := &Analyzer{
 		tokenStore:             cfg.TokenStore,
@@ -106,12 +128,18 @@ func NewAnalyzer(ctx context.Context, cfg Config) (*Analyzer, error) {
 }
 
 func (a *Analyzer) blockLogsHandler(ctx context.Context, logs []types.Log) error {
+	if len(logs) > 0 {
+		a.logger.Debug("Received new block logs for analysis", "log_count", len(logs))
+	}
 	a.tokenHolderAnalyzer.Update(logs)
 	return nil
 }
 
 func (a *Analyzer) updateTokenFeeAndGasLoop(ctx context.Context, ticker *time.Ticker, requester FeeAndGasRequester) {
 	defer ticker.Stop()
+	a.logger.Info("Starting fee and gas update loop")
+	defer a.logger.Info("Stopping fee and gas update loop")
+
 	a.performFeeAndGasUpdate(ctx, requester) // Initial run
 
 	for {
@@ -125,8 +153,10 @@ func (a *Analyzer) updateTokenFeeAndGasLoop(ctx context.Context, ticker *time.Ti
 }
 
 func (a *Analyzer) performFeeAndGasUpdate(ctx context.Context, requester FeeAndGasRequester) {
+	a.logger.Debug("Starting fee and gas update cycle")
 	tokensToRequest := a.filterTokensRequiringUpdate()
 	if len(tokensToRequest) == 0 {
+		a.logger.Debug("No tokens require a fee and gas update")
 		return
 	}
 
@@ -165,6 +195,7 @@ func (a *Analyzer) updateTokens(ctx context.Context, results map[common.Address]
 		tokenView, err := a.tokenStore.GetTokenByAddress(tokenAddr)
 		if err != nil {
 			// If token doesn't exist, initialize it.
+			a.logger.Info("New token detected. Initializing.", "token_address", tokenAddr)
 			initCtx, cancel := context.WithTimeout(ctx, DefaultInitializeRequestTimeout)
 			initializedToken, err := a.tokenInitializer.Initialize(initCtx, tokenAddr, a.tokenStore)
 			cancel()
@@ -186,6 +217,7 @@ func (a *Analyzer) updateTokens(ctx context.Context, results map[common.Address]
 		a.mu.Lock()
 		a.lastFeeAndGasCheck[tokenAddr] = time.Now()
 		a.mu.Unlock()
+		a.logger.Debug("Successfully updated token fee and gas", "token_address", tokenAddr)
 	}
 }
 
