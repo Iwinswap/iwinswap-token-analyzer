@@ -112,6 +112,7 @@ func NewAnalyzer(ctx context.Context, cfg Config) (*Analyzer, error) {
 		errorHandler:           cfg.ErrorHandler,
 		minTokenUpdateInterval: cfg.MinTokenUpdateInterval,
 		lastFeeAndGasCheck:     make(map[common.Address]time.Time),
+		logger:                 cfg.Logger,
 	}
 
 	go cfg.BlockExtractor.Run(
