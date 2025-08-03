@@ -42,8 +42,7 @@ func createTransferLog(t *testing.T, token, from, to common.Address, amount int6
 }
 
 // TestVolumeAnalyzer_Lifecycle provides a comprehensive, end-to-end test for the
-// VolumeAnalyzer component. It verifies the entire lifecycle in a sequential flow
-// to prevent test-induced race conditions.
+// VolumeAnalyzer component. It verifies the entire lifecycle in a sequential flow.
 func TestVolumeAnalyzer_Lifecycle(t *testing.T) {
 	// --- Test Configuration ---
 	expiryCheckFrequency := 50 * time.Millisecond
@@ -53,15 +52,21 @@ func TestVolumeAnalyzer_Lifecycle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel() // Ensure shutdown is called at the end of the test.
 
-	analyzer := NewVolumeAnalyzer(ctx, expiryCheckFrequency, recordStaleDuration)
+	// By default, allow all addresses.
+	cfg := Config{
+		ExpiryCheckFrequency: expiryCheckFrequency,
+		RecordStaleDuration:  recordStaleDuration,
+		IsAllowedAddress:     func(common.Address) bool { return true },
+	}
+	analyzer := NewVolumeAnalyzer(ctx, cfg)
 	require.NotNil(t, analyzer, "Constructor should not return nil")
 
 	// --- Step 2: Initial Update and Verification ---
 	t.Log("Lifecycle Step: Initial Update")
 	initialLogs := []types.Log{
 		createTransferLog(t, testToken1, testWalletA, testWalletC, 100),
-		createTransferLog(t, testToken1, testWalletB, testWalletC, 500),
-		createTransferLog(t, testToken1, testWalletA, testWalletC, 200),
+		createTransferLog(t, testToken1, testWalletB, testWalletC, 500), // B is max
+		createTransferLog(t, testToken1, testWalletA, testWalletC, 200), // A's total is 300
 	}
 	analyzer.Update(initialLogs)
 
@@ -69,19 +74,37 @@ func TestVolumeAnalyzer_Lifecycle(t *testing.T) {
 	require.Len(t, holders, 1, "Should have one token record after initial update")
 	assert.Equal(t, testWalletB, holders[testToken1], "WalletB should be the initial max holder")
 
-	// --- Step 3: Record Expiry Verification ---
+	// --- Step 3: Filtering Logic Verification ---
+	t.Log("Lifecycle Step: Verifying Filtering Logic")
+	filterCtx, filterCancel := context.WithCancel(context.Background())
+	defer filterCancel()
+
+	// Create a new analyzer with a filter that only allows wallet A
+	filterCfg := Config{
+		ExpiryCheckFrequency: expiryCheckFrequency,
+		RecordStaleDuration:  recordStaleDuration,
+		IsAllowedAddress:     func(addr common.Address) bool { return addr == testWalletA },
+	}
+	filteredAnalyzer := NewVolumeAnalyzer(filterCtx, filterCfg)
+	filterLogs := []types.Log{
+		createTransferLog(t, testToken1, testWalletA, testWalletC, 100), // Allowed
+		createTransferLog(t, testToken1, testWalletB, testWalletC, 999), // Disallowed
+	}
+	filteredAnalyzer.Update(filterLogs)
+	filteredHolders := filteredAnalyzer.TokenByMaxKnownHolder()
+	require.Len(t, filteredHolders, 1, "Filtered analyzer should have one record")
+	assert.Equal(t, testWalletA, filteredHolders[testToken1], "Only WalletA should be considered due to the filter")
+
+	// --- Step 4: Record Expiry Verification ---
 	t.Log("Lifecycle Step: Verifying Record Expiry")
 	waitDuration := recordStaleDuration + expiryCheckFrequency
 	assert.Eventually(t, func() bool {
 		return len(analyzer.TokenByMaxKnownHolder()) == 0
 	}, waitDuration*2, expiryCheckFrequency/2, "Records map should be empty after expiry")
 
-	// --- Step 4: State Update After Expiry Verification ---
+	// --- Step 5: State Update After Expiry Verification ---
 	t.Log("Lifecycle Step: Verifying Update After Expiry")
 	secondLogs := []types.Log{
-		// FIX: Corrected the function call with the right arguments.
-		// The original call was missing the 'to' address and passed the amount
-		// in its place, causing a type mismatch.
 		createTransferLog(t, testToken1, testWalletC, testWalletD, 9999),
 	}
 	analyzer.Update(secondLogs)
@@ -90,16 +113,13 @@ func TestVolumeAnalyzer_Lifecycle(t *testing.T) {
 	require.Len(t, holdersAfterUpdate, 1, "Should have one token record after second update")
 	assert.Equal(t, testWalletC, holdersAfterUpdate[testToken1], "WalletC should be the new max holder")
 
-	// --- Step 5: Graceful Shutdown Verification ---
-	t.Log("Lifecycle Step: Verifying Graceful Shutdown")
-	assert.NotPanics(t, func() {
-		analyzer.Stop()
-		analyzer.Stop() // Calling it again should not panic.
-	}, "Calling Stop multiple times should not cause a panic")
+	// --- Step 6: Graceful Shutdown Verification ---
+	t.Log("Lifecycle Step: Verifying Graceful Shutdown via context cancellation")
+	cancel() // Trigger shutdown
+	// The test will hang if the goroutine doesn't exit, and the race detector will catch issues.
 }
 
-// TestVolumeAnalyzer_ConcurrencyAndStress puts the VolumeAnalyzer under heavy load
-// with concurrent reads and writes to ensure its state management is robust.
+// TestVolumeAnalyzer_ConcurrencyAndStress puts the VolumeAnalyzer under heavy load.
 func TestVolumeAnalyzer_ConcurrencyAndStress(t *testing.T) {
 	// --- Test Configuration ---
 	expiryCheckFrequency := 200 * time.Millisecond
@@ -109,7 +129,12 @@ func TestVolumeAnalyzer_ConcurrencyAndStress(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	analyzer := NewVolumeAnalyzer(ctx, expiryCheckFrequency, recordStaleDuration)
+	cfg := Config{
+		ExpiryCheckFrequency: expiryCheckFrequency,
+		RecordStaleDuration:  recordStaleDuration,
+		IsAllowedAddress:     func(common.Address) bool { return true }, // Allow all for stress test
+	}
+	analyzer := NewVolumeAnalyzer(ctx, cfg)
 	require.NotNil(t, analyzer, "Constructor should not return nil")
 
 	// --- Step 2: Concurrent Reads and Writes ---

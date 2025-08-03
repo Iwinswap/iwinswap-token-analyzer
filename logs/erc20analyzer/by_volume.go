@@ -10,35 +10,46 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
+// Config holds the configuration parameters for the VolumeAnalyzer.
+type Config struct {
+	// ExpiryCheckFrequency is the interval at which the analyzer checks for stale records.
+	ExpiryCheckFrequency time.Duration
+	// RecordStaleDuration is the duration after which a record is considered stale and pruned.
+	RecordStaleDuration time.Duration
+	// IsAllowedAddress is a function to filter which addresses are included in the analysis.
+	// If nil, all addresses are considered allowed.
+	IsAllowedAddress func(common.Address) bool
+}
+
 // VolumeAnalyzer is an implementation of TokenHolderAnalyzer that determines
 // the primary holder based on the highest total transfer volume.
 type VolumeAnalyzer struct {
-	mu            sync.RWMutex
-	records       map[common.Address]MaxTransferrer
-	stopChan      chan struct{}
-	staleDuration time.Duration
-	checkTicker   *time.Ticker
-	stopOnce      sync.Once
+	mu               sync.RWMutex
+	records          map[common.Address]MaxTransferrer
+	staleDuration    time.Duration
+	checkTicker      *time.Ticker
+	isAllowedAddress func(common.Address) bool
 }
 
 // ensures we implement the correct interface
 var _ erc20analyzer.TokenHolderAnalyzer = (*VolumeAnalyzer)(nil)
 
 // NewVolumeAnalyzer creates and starts a new instance of the volume-based analyzer.
-func NewVolumeAnalyzer(ctx context.Context, expiryCheckFrequency, recordStaleDuration time.Duration) *VolumeAnalyzer {
-	a := &VolumeAnalyzer{
-		records:       make(map[common.Address]MaxTransferrer),
-		stopChan:      make(chan struct{}),
-		staleDuration: recordStaleDuration,
-		checkTicker:   time.NewTicker(expiryCheckFrequency),
+func NewVolumeAnalyzer(ctx context.Context, cfg Config) *VolumeAnalyzer {
+	// Default to allowing all addresses if no function is provided.
+	if cfg.IsAllowedAddress == nil {
+		cfg.IsAllowedAddress = func(common.Address) bool { return true }
 	}
-	go a.startExpiryTicker()
 
-	// Listen for the parent context to be done, so we can stop our ticker
-	go func() {
-		<-ctx.Done()
-		a.Stop()
-	}()
+	a := &VolumeAnalyzer{
+		records:          make(map[common.Address]MaxTransferrer),
+		staleDuration:    cfg.RecordStaleDuration,
+		checkTicker:      time.NewTicker(cfg.ExpiryCheckFrequency),
+		isAllowedAddress: cfg.IsAllowedAddress,
+	}
+
+	// The ticker is stopped automatically when the context is done.
+	go a.startExpiryTicker(ctx)
 
 	return a
 }
@@ -51,8 +62,8 @@ func (a *VolumeAnalyzer) Update(logs []types.Log) {
 	if len(logs) == 0 {
 		return
 	}
-	// This implementation's strategy is to use the total volume.
-	newRecords := ExtractMaxTotalVolumeTransferrer(logs)
+
+	newRecords := ExtractMaxTotalVolumeTransferrer(logs, a.isAllowedAddress)
 	if len(newRecords) == 0 {
 		return
 	}
@@ -73,12 +84,14 @@ func (a *VolumeAnalyzer) TokenByMaxKnownHolder() map[common.Address]common.Addre
 }
 
 // startExpiryTicker runs the background process to prune stale records.
-func (a *VolumeAnalyzer) startExpiryTicker() {
+// It terminates when the provided context is canceled.
+func (a *VolumeAnalyzer) startExpiryTicker(ctx context.Context) {
+	defer a.checkTicker.Stop()
 	for {
 		select {
 		case <-a.checkTicker.C:
 			a.expireRecords()
-		case <-a.stopChan:
+		case <-ctx.Done():
 			return
 		}
 	}
@@ -89,13 +102,4 @@ func (a *VolumeAnalyzer) expireRecords() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.records = ExpireMaxTransferrers(a.records, a.staleDuration)
-}
-
-// Stop gracefully terminates the background expiry ticker. This function is idempotent
-// and safe to call multiple times.
-func (a *VolumeAnalyzer) Stop() {
-	a.stopOnce.Do(func() {
-		a.checkTicker.Stop()
-		close(a.stopChan)
-	})
 }

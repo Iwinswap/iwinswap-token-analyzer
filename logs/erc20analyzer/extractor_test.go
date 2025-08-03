@@ -23,7 +23,7 @@ func TestExtractMaxSingleTransfer(t *testing.T) {
 		walletC = common.HexToAddress("0xC")
 	)
 
-	// createTransferLog is a helper function scoped to this test function.
+	// --- Helper Functions for Test ---
 	createTransferLog := func(token, from, to common.Address, amount int64) types.Log {
 		val := new(big.Int).SetInt64(amount)
 		return types.Log{
@@ -36,40 +36,46 @@ func TestExtractMaxSingleTransfer(t *testing.T) {
 			Data: common.LeftPadBytes(val.Bytes(), 32),
 		}
 	}
+	allowAll := func(common.Address) bool { return true }
+	allowOnlyWalletA := func(addr common.Address) bool { return addr == walletA }
 
 	testCases := []struct {
-		name        string
-		logs        []types.Log
-		expectedMap map[common.Address]MaxTransferrer
-		description string
+		name          string
+		logs          []types.Log
+		isAllowedFunc func(common.Address) bool
+		expectedMap   map[common.Address]MaxTransferrer
+		description   string
 	}{
 		{
-			name: "Happy Path - New max value updates record",
-			logs: []types.Log{
-				createTransferLog(token1, walletA, walletC, 500),
-				createTransferLog(token1, walletB, walletC, 1000), // New max
-			},
-			expectedMap: map[common.Address]MaxTransferrer{
-				token1: {Address: walletB, Amount: big.NewInt(1000)},
-			},
-			description: "Should correctly update the max transferrer when a larger transfer occurs.",
+			name:          "Happy Path - New max value updates record",
+			logs:          []types.Log{createTransferLog(token1, walletA, walletC, 500), createTransferLog(token1, walletB, walletC, 1000)},
+			isAllowedFunc: allowAll,
+			expectedMap:   map[common.Address]MaxTransferrer{token1: {Address: walletB, Amount: big.NewInt(1000)}},
+			description:   "Should correctly update the max transferrer when a larger transfer occurs.",
 		},
 		{
-			name: "Edge Case - Tie in max value",
-			logs: []types.Log{
-				createTransferLog(token1, walletA, walletC, 1000), // WalletA is first
-				createTransferLog(token1, walletB, walletC, 1000), // WalletB is second, should not update
-			},
-			expectedMap: map[common.Address]MaxTransferrer{
-				token1: {Address: walletA, Amount: big.NewInt(1000)},
-			},
-			description: "In a tie, the first address to transfer the max amount should be kept.",
+			name:          "Edge Case - Tie in max value",
+			logs:          []types.Log{createTransferLog(token1, walletA, walletC, 1000), createTransferLog(token1, walletB, walletC, 1000)},
+			isAllowedFunc: allowAll,
+			expectedMap:   map[common.Address]MaxTransferrer{token1: {Address: walletA, Amount: big.NewInt(1000)}},
+			description:   "In a tie, the first address to transfer the max amount should be kept.",
 		},
 		{
-			name:        "Input - Empty log slice",
-			logs:        []types.Log{},
-			expectedMap: map[common.Address]MaxTransferrer{},
-			description: "Should return an empty map for empty log input.",
+			name: "Filtering - Ignores disallowed address",
+			logs: []types.Log{
+				createTransferLog(token1, walletA, walletC, 100),   // Allowed
+				createTransferLog(token1, walletB, walletC, 99999), // Disallowed, should be ignored
+			},
+			isAllowedFunc: allowOnlyWalletA,
+			expectedMap:   map[common.Address]MaxTransferrer{token1: {Address: walletA, Amount: big.NewInt(100)}},
+			description:   "Should ignore a larger transfer from a disallowed address.",
+		},
+		{
+			name:          "Input - Empty log slice",
+			logs:          []types.Log{},
+			isAllowedFunc: allowAll,
+			expectedMap:   map[common.Address]MaxTransferrer{},
+			description:   "Should return an empty map for empty log input.",
 		},
 	}
 
@@ -78,7 +84,7 @@ func TestExtractMaxSingleTransfer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			t.Log(tc.description)
-			actualMap := ExtractMaxSingleTransfer(tc.logs)
+			actualMap := ExtractMaxSingleTransfer(tc.logs, tc.isAllowedFunc)
 			verifyMaxTransferrerMapTestHelper(t, tc.expectedMap, actualMap)
 		})
 	}
@@ -97,7 +103,7 @@ func TestExtractMaxTotalVolumeTransferrer(t *testing.T) {
 		walletC = common.HexToAddress("0xC")
 	)
 
-	// Scoped helper function for this test.
+	// --- Helper Functions for Test ---
 	createTransferLog := func(token, from, to common.Address, amount int64) types.Log {
 		val := new(big.Int).SetInt64(amount)
 		return types.Log{
@@ -110,12 +116,15 @@ func TestExtractMaxTotalVolumeTransferrer(t *testing.T) {
 			Data: common.LeftPadBytes(val.Bytes(), 32),
 		}
 	}
+	allowAll := func(common.Address) bool { return true }
+	allowOnlyAandC := func(addr common.Address) bool { return addr == walletA || addr == walletC }
 
 	testCases := []struct {
-		name        string
-		logs        []types.Log
-		expectedMap map[common.Address]MaxTransferrer
-		description string
+		name          string
+		logs          []types.Log
+		isAllowedFunc func(common.Address) bool
+		expectedMap   map[common.Address]MaxTransferrer
+		description   string
 	}{
 		{
 			name: "Happy Path - Sums transfers and finds max volume",
@@ -125,29 +134,31 @@ func TestExtractMaxTotalVolumeTransferrer(t *testing.T) {
 				createTransferLog(token1, walletA, walletC, 301), // walletA total is now 401
 				createTransferLog(token2, walletC, walletA, 999),
 			},
+			isAllowedFunc: allowAll,
 			expectedMap: map[common.Address]MaxTransferrer{
 				token1: {Address: walletA, Amount: big.NewInt(401)},
 				token2: {Address: walletC, Amount: big.NewInt(999)},
 			},
-			description: "Should sum transfers from the same address and identify the one with the highest total volume.",
+			description: "Should sum transfers and identify the address with the highest total volume.",
 		},
 		{
-			name: "Edge Case - One address dominates",
+			name: "Filtering - Ignores volume from disallowed address",
 			logs: []types.Log{
-				createTransferLog(token1, walletA, walletC, 100),
-				createTransferLog(token1, walletA, walletC, 200),
-				createTransferLog(token1, walletA, walletC, 300),
+				createTransferLog(token1, walletA, walletC, 100),   // Allowed: A total = 100
+				createTransferLog(token1, walletB, walletA, 99999), // Disallowed, volume ignored
+				createTransferLog(token1, walletC, walletA, 101),   // Allowed: C total = 101
+				createTransferLog(token1, walletA, walletC, 50),    // Allowed: A total = 150 (new max)
 			},
-			expectedMap: map[common.Address]MaxTransferrer{
-				token1: {Address: walletA, Amount: big.NewInt(600)},
-			},
-			description: "Should correctly sum up multiple transfers from a single address.",
+			isAllowedFunc: allowOnlyAandC,
+			expectedMap:   map[common.Address]MaxTransferrer{token1: {Address: walletA, Amount: big.NewInt(150)}},
+			description:   "Should completely ignore transfers from a disallowed address when summing volume.",
 		},
 		{
-			name:        "Input - Empty log slice",
-			logs:        []types.Log{},
-			expectedMap: map[common.Address]MaxTransferrer{},
-			description: "Should return an empty map for empty log input.",
+			name:          "Input - Empty log slice",
+			logs:          []types.Log{},
+			isAllowedFunc: allowAll,
+			expectedMap:   map[common.Address]MaxTransferrer{},
+			description:   "Should return an empty map for empty log input.",
 		},
 	}
 
@@ -156,38 +167,15 @@ func TestExtractMaxTotalVolumeTransferrer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			t.Log(tc.description)
-			actualMap := ExtractMaxTotalVolumeTransferrer(tc.logs)
+			actualMap := ExtractMaxTotalVolumeTransferrer(tc.logs, tc.isAllowedFunc)
 			verifyMaxTransferrerMapTestHelper(t, tc.expectedMap, actualMap)
 		})
 	}
 }
 
-// FuzzExtractMaxSingleTransfer ensures the function can gracefully handle arbitrary
-// or malformed log data without panicking.
+// FuzzExtractMaxSingleTransfer ensures the function can gracefully handle arbitrary data.
 func FuzzExtractMaxSingleTransfer(f *testing.F) {
-	// Add some valid seed data to guide the fuzzer.
 	f.Add(common.HexToAddress("0x1").Bytes(), common.HexToAddress("0xA").Bytes(), int64(100))
-
-	f.Fuzz(func(t *testing.T, addrBytes, fromBytes []byte, amount int64) {
-		log := types.Log{
-			Address: common.BytesToAddress(addrBytes),
-			Topics: []common.Hash{
-				abi.ERC20ABI.Events["Transfer"].ID, // Correctly include the event signature
-				common.BytesToHash(fromBytes),
-				common.HexToHash("0x0"), // Dummy recipient
-			},
-			Data: new(big.Int).SetInt64(amount).Bytes(),
-		}
-		// Test will fail if the function panics on unexpected input.
-		ExtractMaxSingleTransfer([]types.Log{log})
-	})
-}
-
-// FuzzExtractMaxTotalVolumeTransferrer ensures the summation logic can gracefully
-// handle arbitrary log data without panicking.
-func FuzzExtractMaxTotalVolumeTransferrer(f *testing.F) {
-	f.Add(common.HexToAddress("0x1").Bytes(), common.HexToAddress("0xA").Bytes(), int64(100))
-
 	f.Fuzz(func(t *testing.T, addrBytes, fromBytes []byte, amount int64) {
 		log := types.Log{
 			Address: common.BytesToAddress(addrBytes),
@@ -198,17 +186,33 @@ func FuzzExtractMaxTotalVolumeTransferrer(f *testing.F) {
 			},
 			Data: new(big.Int).SetInt64(amount).Bytes(),
 		}
-		ExtractMaxTotalVolumeTransferrer([]types.Log{log})
+		// Test will fail if the function panics. We use a simple "allow all" filter.
+		ExtractMaxSingleTransfer([]types.Log{log}, func(common.Address) bool { return true })
 	})
 }
 
-// verifyMaxTransferrerMapTestHelper is a file-scoped helper function to provide consistent,
-// robust assertions for maps of MaxTransferrer structs.
+// FuzzExtractMaxTotalVolumeTransferrer ensures the summation logic can gracefully handle arbitrary data.
+func FuzzExtractMaxTotalVolumeTransferrer(f *testing.F) {
+	f.Add(common.HexToAddress("0x1").Bytes(), common.HexToAddress("0xA").Bytes(), int64(100))
+	f.Fuzz(func(t *testing.T, addrBytes, fromBytes []byte, amount int64) {
+		log := types.Log{
+			Address: common.BytesToAddress(addrBytes),
+			Topics: []common.Hash{
+				abi.ERC20ABI.Events["Transfer"].ID,
+				common.BytesToHash(fromBytes),
+				common.HexToHash("0x0"),
+			},
+			Data: new(big.Int).SetInt64(amount).Bytes(),
+		}
+		// Test will fail if the function panics. We use a simple "allow all" filter.
+		ExtractMaxTotalVolumeTransferrer([]types.Log{log}, func(common.Address) bool { return true })
+	})
+}
+
+// verifyMaxTransferrerMapTestHelper remains unchanged.
 func verifyMaxTransferrerMapTestHelper(t *testing.T, expected, actual map[common.Address]MaxTransferrer) {
-	t.Helper() // Marks this function as a test helper.
-
+	t.Helper()
 	require.Len(t, actual, len(expected), "The number of tokens in the result map is incorrect.")
-
 	for expectedToken, expectedTransferrer := range expected {
 		actualTransferrer, ok := actual[expectedToken]
 		require.True(t, ok, "Expected token %s was not found in the result.", expectedToken.Hex())
