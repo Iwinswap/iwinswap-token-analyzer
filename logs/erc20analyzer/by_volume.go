@@ -25,7 +25,7 @@ type Config struct {
 // the primary holder based on the highest total transfer volume.
 type VolumeAnalyzer struct {
 	mu               sync.RWMutex
-	records          map[common.Address]MaxTransferrer
+	records          map[common.Address]MaxTransferRecord
 	staleDuration    time.Duration
 	checkTicker      *time.Ticker
 	isAllowedAddress func(common.Address) bool
@@ -42,7 +42,7 @@ func NewVolumeAnalyzer(ctx context.Context, cfg Config) *VolumeAnalyzer {
 	}
 
 	a := &VolumeAnalyzer{
-		records:          make(map[common.Address]MaxTransferrer),
+		records:          make(map[common.Address]MaxTransferRecord),
 		staleDuration:    cfg.RecordStaleDuration,
 		checkTicker:      time.NewTicker(cfg.ExpiryCheckFrequency),
 		isAllowedAddress: cfg.IsAllowedAddress,
@@ -63,12 +63,15 @@ func (a *VolumeAnalyzer) Update(logs []types.Log) {
 		return
 	}
 
-	newRecords := ExtractMaxTotalVolumeTransferrer(logs, a.isAllowedAddress)
+	// it makes more sense to extract the max total volume receiver
+	// rather than the max total volume transferrer
+	// because the receivers will be more likely to still hold the token
+	newRecords := ExtractMaxTotalVolumeReceiver(logs, a.isAllowedAddress)
 	if len(newRecords) == 0 {
 		return
 	}
 
-	a.records = MergeMaxTransferrers(a.records, newRecords)
+	a.records = MergeMaxTransferRecords(a.records, newRecords)
 }
 
 // TokenByMaxKnownHolder returns the current primary holders based on total volume.
@@ -101,5 +104,5 @@ func (a *VolumeAnalyzer) startExpiryTicker(ctx context.Context) {
 func (a *VolumeAnalyzer) expireRecords() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.records = ExpireMaxTransferrers(a.records, a.staleDuration)
+	a.records = ExpireMaxTransferRecords(a.records, a.staleDuration)
 }

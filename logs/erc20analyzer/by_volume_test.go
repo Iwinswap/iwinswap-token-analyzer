@@ -64,36 +64,37 @@ func TestVolumeAnalyzer_Lifecycle(t *testing.T) {
 	// --- Step 2: Initial Update and Verification ---
 	t.Log("Lifecycle Step: Initial Update")
 	initialLogs := []types.Log{
-		createTransferLog(t, testToken1, testWalletA, testWalletC, 100),
-		createTransferLog(t, testToken1, testWalletB, testWalletC, 500), // B is max
-		createTransferLog(t, testToken1, testWalletA, testWalletC, 200), // A's total is 300
+		createTransferLog(t, testToken1, testWalletA, testWalletC, 100), // C receives 100
+		createTransferLog(t, testToken1, testWalletB, testWalletD, 500), // D receives 500 (max)
+		createTransferLog(t, testToken1, testWalletA, testWalletC, 200), // C receives another 200 (total 300)
 	}
 	analyzer.Update(initialLogs)
 
 	holders := analyzer.TokenByMaxKnownHolder()
+	// --- FIX: The function correctly returns only the single top holder for the token. ---
 	require.Len(t, holders, 1, "Should have one token record after initial update")
-	assert.Equal(t, testWalletB, holders[testToken1], "WalletB should be the initial max holder")
+	assert.Equal(t, testWalletD, holders[testToken1], "WalletD should be the initial max holder for token1")
 
 	// --- Step 3: Filtering Logic Verification ---
 	t.Log("Lifecycle Step: Verifying Filtering Logic")
 	filterCtx, filterCancel := context.WithCancel(context.Background())
 	defer filterCancel()
 
-	// Create a new analyzer with a filter that only allows wallet A
+	// Create a new analyzer with a filter that only allows wallet C to be a receiver
 	filterCfg := Config{
 		ExpiryCheckFrequency: expiryCheckFrequency,
 		RecordStaleDuration:  recordStaleDuration,
-		IsAllowedAddress:     func(addr common.Address) bool { return addr == testWalletA },
+		IsAllowedAddress:     func(addr common.Address) bool { return addr == testWalletC },
 	}
 	filteredAnalyzer := NewVolumeAnalyzer(filterCtx, filterCfg)
 	filterLogs := []types.Log{
 		createTransferLog(t, testToken1, testWalletA, testWalletC, 100), // Allowed
-		createTransferLog(t, testToken1, testWalletB, testWalletC, 999), // Disallowed
+		createTransferLog(t, testToken1, testWalletB, testWalletD, 999), // Disallowed (to D)
 	}
 	filteredAnalyzer.Update(filterLogs)
 	filteredHolders := filteredAnalyzer.TokenByMaxKnownHolder()
 	require.Len(t, filteredHolders, 1, "Filtered analyzer should have one record")
-	assert.Equal(t, testWalletA, filteredHolders[testToken1], "Only WalletA should be considered due to the filter")
+	assert.Equal(t, testWalletC, filteredHolders[testToken1], "Only WalletC should be considered due to the filter")
 
 	// --- Step 4: Record Expiry Verification ---
 	t.Log("Lifecycle Step: Verifying Record Expiry")
@@ -105,13 +106,13 @@ func TestVolumeAnalyzer_Lifecycle(t *testing.T) {
 	// --- Step 5: State Update After Expiry Verification ---
 	t.Log("Lifecycle Step: Verifying Update After Expiry")
 	secondLogs := []types.Log{
-		createTransferLog(t, testToken1, testWalletC, testWalletD, 9999),
+		createTransferLog(t, testToken1, testWalletA, testWalletD, 9999),
 	}
 	analyzer.Update(secondLogs)
 
 	holdersAfterUpdate := analyzer.TokenByMaxKnownHolder()
 	require.Len(t, holdersAfterUpdate, 1, "Should have one token record after second update")
-	assert.Equal(t, testWalletC, holdersAfterUpdate[testToken1], "WalletC should be the new max holder")
+	assert.Equal(t, testWalletD, holdersAfterUpdate[testToken1], "WalletD should be the new max holder")
 
 	// --- Step 6: Graceful Shutdown Verification ---
 	t.Log("Lifecycle Step: Verifying Graceful Shutdown via context cancellation")
@@ -149,10 +150,11 @@ func TestVolumeAnalyzer_ConcurrencyAndStress(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < updatesPerGoroutine; j++ {
+				// In each update, D receives the most volume for both tokens
 				logs := []types.Log{
-					createTransferLog(t, testToken1, testWalletA, testWalletC, 10),
-					createTransferLog(t, testToken1, testWalletB, testWalletD, 20),
-					createTransferLog(t, testToken2, testWalletC, testWalletD, 5),
+					createTransferLog(t, testToken1, testWalletA, testWalletC, 10), // C receives 10
+					createTransferLog(t, testToken1, testWalletB, testWalletD, 20), // D receives 20
+					createTransferLog(t, testToken2, testWalletC, testWalletD, 5),  // D receives 5
 				}
 				analyzer.Update(logs)
 				time.Sleep(time.Duration(rand.Intn(5)) * time.Millisecond)
@@ -166,8 +168,9 @@ func TestVolumeAnalyzer_ConcurrencyAndStress(t *testing.T) {
 	t.Log("All updates complete. Verifying final state...")
 	finalHolders := analyzer.TokenByMaxKnownHolder()
 
-	expectedHolderToken1 := testWalletB
-	expectedHolderToken2 := testWalletC
+	// The max receiver for token1 is D (receives 20). The max for token2 is also D (receives 5).
+	expectedHolderToken1 := testWalletD
+	expectedHolderToken2 := testWalletD
 
 	require.Len(t, finalHolders, 2, "Should have records for exactly two tokens")
 	assert.Equal(t, expectedHolderToken1, finalHolders[testToken1], "Incorrect final max holder for token 1")
