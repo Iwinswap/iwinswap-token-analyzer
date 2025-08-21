@@ -6,20 +6,20 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-// MergeMaxTransferrers combines two maps of MaxTransferrer records.
+// MergeMaxTransferRecords combines two maps of MaxTransferRecord records.
 // It returns a new map containing the merged result, leaving the original maps untouched.
 //
 // The merging logic is as follows:
 //  1. All records from the 'old' map are carried over.
 //  2. Records from the 'new' map are then merged. If a token exists in both maps,
 //     the record with the larger transfer Amount is chosen.
-func MergeMaxTransferrers(
-	old, new map[common.Address]MaxTransferrer,
-) map[common.Address]MaxTransferrer {
+func MergeMaxTransferRecords(
+	old, new map[common.Address]MaxTransferRecord,
+) map[common.Address]MaxTransferRecord {
 
 	// 1. Create a new map to store the result, pre-allocating its capacity
 	//    and starting with a copy of the old records. This is efficient.
-	merged := make(map[common.Address]MaxTransferrer, len(old))
+	merged := make(map[common.Address]MaxTransferRecord, len(old))
 	for token, transferrer := range old {
 		merged[token] = transferrer
 	}
@@ -39,14 +39,14 @@ func MergeMaxTransferrers(
 	return merged
 }
 
-// ExpireMaxTransferrers filters a map of MaxTransferrer records, returning a new
+// ExpireMaxTransferRecords filters a map of MaxTransferRecord records, returning a new
 // map containing only the records that are not considered stale.
-func ExpireMaxTransferrers(
-	records map[common.Address]MaxTransferrer,
+func ExpireMaxTransferRecords(
+	records map[common.Address]MaxTransferRecord,
 	staleAfter time.Duration,
-) map[common.Address]MaxTransferrer {
+) map[common.Address]MaxTransferRecord {
 	// Pre-allocate the new map with a reasonable starting capacity.
-	freshRecords := make(map[common.Address]MaxTransferrer, len(records))
+	freshRecords := make(map[common.Address]MaxTransferRecord, len(records))
 
 	for token, transferrer := range records {
 		// Keep the record only if the time elapsed since it was recorded
