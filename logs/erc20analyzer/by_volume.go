@@ -63,10 +63,11 @@ func (a *VolumeAnalyzer) Update(logs []types.Log) {
 		return
 	}
 
-	// it makes more sense to extract the max total volume receiver
-	// rather than the max total volume transferrer
-	// because the receivers will be more likely to still hold the token
-	newRecords := ExtractMaxTotalVolumeReceiver(logs, a.isAllowedAddress)
+	// Extract the max total volume transferrers from the logs.
+	// @todo this function should be passed as a dependency to allow for better flexibility
+	// using ExtractMaxTotalVolumeTransferrer will enable faster token detection (but with a probabilty that records might no longer hold tokens )
+	// using ExtractMaxTotalVolumeReceiver gives a higher probability that records will hold tokens, but depending on a.isAllowedAddress, it might detect tokens slower
+	newRecords := ExtractMaxTotalVolumeTransferrer(logs, a.isAllowedAddress)
 	if len(newRecords) == 0 {
 		return
 	}
