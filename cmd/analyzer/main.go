@@ -28,6 +28,7 @@ import (
 	erc20_log_volume_analyzer "github.com/Iwinswap/iwinswap-token-analyzer/logs/erc20analyzer"
 	logextractor "github.com/Iwinswap/iwinswap-token-analyzer/logs/extractor"
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
@@ -153,7 +154,17 @@ func setupERC20Analyzer(ctx context.Context, cfg config.ChainConfig, logger *slo
 
 	// 4. Token Holder Analyzer (Volume based)
 	volumeAnalyzerCfg := cfg.ERC20Analyzer.VolumeAnalyzer
-	tokenHolderAnalyzer := erc20_log_volume_analyzer.NewVolumeAnalyzer(ctx, volumeAnalyzerCfg.ExpiryCheckFrequency, volumeAnalyzerCfg.RecordStaleDuration)
+	tokenHolderAnalyzer, err := erc20_log_volume_analyzer.NewVolumeAnalyzer(
+		ctx,
+		erc20_log_volume_analyzer.Config{
+			ExpiryCheckFrequency: volumeAnalyzerCfg.ExpiryCheckFrequency,
+			RecordStaleDuration:  volumeAnalyzerCfg.RecordStaleDuration,
+			IsAllowedAddress:     func(a common.Address) bool { return true },
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create volume analyzer: %w", err)
+	}
 
 	// 5. Fee and Gas Requester (Fork based)
 	requesterCfg := cfg.FeeAndGasRequester
