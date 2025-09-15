@@ -52,13 +52,13 @@ func TestVolumeAnalyzer_Lifecycle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel() // Ensure shutdown is called at the end of the test.
 
-	// By default, allow all addresses.
 	cfg := Config{
 		ExpiryCheckFrequency: expiryCheckFrequency,
 		RecordStaleDuration:  recordStaleDuration,
 		IsAllowedAddress:     func(common.Address) bool { return true },
 	}
-	analyzer := NewVolumeAnalyzer(ctx, cfg)
+	analyzer, err := NewVolumeAnalyzer(ctx, cfg)
+	require.NoError(t, err)
 	require.NotNil(t, analyzer, "Constructor should not return nil")
 
 	// --- Step 2: Initial Update and Verification ---
@@ -85,7 +85,8 @@ func TestVolumeAnalyzer_Lifecycle(t *testing.T) {
 		RecordStaleDuration:  recordStaleDuration,
 		IsAllowedAddress:     func(addr common.Address) bool { return addr == testWalletA },
 	}
-	filteredAnalyzer := NewVolumeAnalyzer(filterCtx, filterCfg)
+	filteredAnalyzer, err := NewVolumeAnalyzer(filterCtx, filterCfg)
+	require.NoError(t, err)
 	filterLogs := []types.Log{
 		createTransferLog(t, testToken1, testWalletA, testWalletC, 100), // Allowed
 		createTransferLog(t, testToken1, testWalletB, testWalletC, 999), // Disallowed
@@ -95,12 +96,22 @@ func TestVolumeAnalyzer_Lifecycle(t *testing.T) {
 	require.Len(t, filteredHolders, 1, "Filtered analyzer should have one record")
 	assert.Equal(t, testWalletA, filteredHolders[testToken1], "Only WalletA should be considered due to the filter")
 
-	// --- Step 4: Record Expiry Verification ---
-	t.Log("Lifecycle Step: Verifying Record Expiry")
+	// --- Step 4: Record Reset Verification ---
+	t.Log("Lifecycle Step: Verifying Record Reset")
 	waitDuration := recordStaleDuration + expiryCheckFrequency
+
+	// The record should NOT be deleted. Instead, its amount should be reset to zero.
 	assert.Eventually(t, func() bool {
-		return len(analyzer.TokenByMaxKnownHolder()) == 0
-	}, waitDuration*2, expiryCheckFrequency/2, "Records map should be empty after expiry")
+		record, ok := analyzer.RecordByToken(testToken1)
+		require.True(t, ok, "Record for testToken1 should not be deleted")
+		// Check if the amount is now zero
+		return record.Amount.Cmp(big.NewInt(0)) == 0
+	}, waitDuration*2, expiryCheckFrequency/2, "Record amount should be reset to zero")
+
+	// Verify the holder address is preserved
+	holders = analyzer.TokenByMaxKnownHolder()
+	require.Len(t, holders, 1, "Holders map should still contain one record")
+	assert.Equal(t, testWalletB, holders[testToken1], "Holder address should be preserved after reset")
 
 	// --- Step 5: State Update After Expiry Verification ---
 	t.Log("Lifecycle Step: Verifying Update After Expiry")
@@ -134,7 +145,8 @@ func TestVolumeAnalyzer_ConcurrencyAndStress(t *testing.T) {
 		RecordStaleDuration:  recordStaleDuration,
 		IsAllowedAddress:     func(common.Address) bool { return true }, // Allow all for stress test
 	}
-	analyzer := NewVolumeAnalyzer(ctx, cfg)
+	analyzer, err := NewVolumeAnalyzer(ctx, cfg)
+	require.NoError(t, err)
 	require.NotNil(t, analyzer, "Constructor should not return nil")
 
 	// --- Step 2: Concurrent Reads and Writes ---
@@ -173,9 +185,20 @@ func TestVolumeAnalyzer_ConcurrencyAndStress(t *testing.T) {
 	assert.Equal(t, expectedHolderToken1, finalHolders[testToken1], "Incorrect final max holder for token 1")
 	assert.Equal(t, expectedHolderToken2, finalHolders[testToken2], "Incorrect final max holder for token 2")
 
-	// --- Step 4: Verify Expiry Still Works Under Load ---
+	// --- Step 4: Verify Reset Still Works Under Load ---
 	t.Logf("Waiting for all records to become stale (waiting > %s)...", recordStaleDuration)
+
 	assert.Eventually(t, func() bool {
-		return len(analyzer.TokenByMaxKnownHolder()) == 0
-	}, recordStaleDuration*2, expiryCheckFrequency/4, "Records map should be empty after expiry under load")
+		record1, ok1 := analyzer.RecordByToken(testToken1)
+		record2, ok2 := analyzer.RecordByToken(testToken2)
+
+		// Both records must exist and have their amounts reset to zero
+		return ok1 && ok2 &&
+			record1.Amount.Cmp(big.NewInt(0)) == 0 &&
+			record2.Amount.Cmp(big.NewInt(0)) == 0
+	}, recordStaleDuration*2, expiryCheckFrequency/4, "All record amounts should be reset to zero")
+
+	// Verify the final map length is still correct
+	finalHolders = analyzer.TokenByMaxKnownHolder()
+	require.Len(t, finalHolders, 2, "Holders map should still contain two records")
 }

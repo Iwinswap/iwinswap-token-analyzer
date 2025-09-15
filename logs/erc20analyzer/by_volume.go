@@ -2,6 +2,8 @@ package erc20analyzer
 
 import (
 	"context"
+	"errors"
+	"math/big"
 	"sync"
 	"time"
 
@@ -17,8 +19,21 @@ type Config struct {
 	// RecordStaleDuration is the duration after which a record is considered stale and pruned.
 	RecordStaleDuration time.Duration
 	// IsAllowedAddress is a function to filter which addresses are included in the analysis.
-	// If nil, all addresses are considered allowed.
 	IsAllowedAddress func(common.Address) bool
+}
+
+func (cfg Config) validate() error {
+	if cfg.ExpiryCheckFrequency <= 0 {
+		return errors.New("ExpiryCheckFrequency cannot be <= 0")
+	}
+	if cfg.RecordStaleDuration <= 0 {
+		return errors.New("RecordStaleDuration cannot be <= 0")
+	}
+	if cfg.IsAllowedAddress == nil {
+		return errors.New("IsAllowedAddress cannot be nil")
+	}
+
+	return nil
 }
 
 // VolumeAnalyzer is an implementation of TokenHolderAnalyzer that determines
@@ -35,10 +50,9 @@ type VolumeAnalyzer struct {
 var _ erc20analyzer.TokenHolderAnalyzer = (*VolumeAnalyzer)(nil)
 
 // NewVolumeAnalyzer creates and starts a new instance of the volume-based analyzer.
-func NewVolumeAnalyzer(ctx context.Context, cfg Config) *VolumeAnalyzer {
-	// Default to allowing all addresses if no function is provided.
-	if cfg.IsAllowedAddress == nil {
-		cfg.IsAllowedAddress = func(common.Address) bool { return true }
+func NewVolumeAnalyzer(ctx context.Context, cfg Config) (*VolumeAnalyzer, error) {
+	if err := cfg.validate(); err != nil {
+		return nil, err
 	}
 
 	a := &VolumeAnalyzer{
@@ -51,7 +65,7 @@ func NewVolumeAnalyzer(ctx context.Context, cfg Config) *VolumeAnalyzer {
 	// The ticker is stopped automatically when the context is done.
 	go a.startExpiryTicker(ctx)
 
-	return a
+	return a, nil
 }
 
 // Update processes logs to find the highest total volume transferrers and updates the state.
@@ -87,6 +101,21 @@ func (a *VolumeAnalyzer) TokenByMaxKnownHolder() map[common.Address]common.Addre
 	return result
 }
 
+// RecordByToken returns the MaxTransferRecord for a given token address.
+// It returns the record and a boolean indicating if the token was found.
+func (a *VolumeAnalyzer) RecordByToken(token common.Address) (MaxTransferRecord, bool) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	record, ok := a.records[token]
+	if !ok {
+		return MaxTransferRecord{}, false
+	}
+
+	recordCpy := record
+	recordCpy.Amount = new(big.Int).Set(record.Amount)
+	return recordCpy, ok
+}
+
 // startExpiryTicker runs the background process to prune stale records.
 // It terminates when the provided context is canceled.
 func (a *VolumeAnalyzer) startExpiryTicker(ctx context.Context) {
@@ -94,16 +123,39 @@ func (a *VolumeAnalyzer) startExpiryTicker(ctx context.Context) {
 	for {
 		select {
 		case <-a.checkTicker.C:
-			a.expireRecords()
+			a.resetStaleRecords()
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-// expireRecords performs the actual pruning of stale data.
-func (a *VolumeAnalyzer) expireRecords() {
+// resetStaleRecords performs the actual pruning of stale data.
+//
+// Problem:
+// The current implementation creates gaps for which we would have zero records for all tokens
+// This is unacceptable
+// If we provided holders for a token in the past, we should try our possible best to provide at least
+// the same holders in the future
+//
+// Solution:
+// Instead of simply deleting records, we set the max transfer record Amount to zero
+// This ensures that we still retain holders for tokens with no current activity
+func (a *VolumeAnalyzer) resetStaleRecords() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.records = ExpireMaxTransferRecords(a.records, a.staleDuration)
+
+	now := time.Now()
+	for token, record := range a.records {
+		// expire by resetting Amount to zero
+		// this ensures that we always have a potentially valid holder
+		// even though a token has no activity for a while
+		if time.Since(record.Time) > a.staleDuration {
+			a.records[token] = MaxTransferRecord{
+				Address: record.Address,             // keep address
+				Amount:  record.Amount.SetUint64(0), // reuse big.Int
+				Time:    now,                        // set new time
+			}
+		}
+	}
 }
